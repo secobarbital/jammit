@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
-  s.name      = 'jammit'
+  s.name      = 'secobarbital-jammit'
   s.version   = '0.5.0'         # Keep version in sync with jammit.rb
-  s.date      = '2010-2-19'
+  s.date      = '2010-4-15'
 
   s.homepage    = "http://documentcloud.github.com/jammit/"
   s.summary     = "Industrial Strength Asset Packaging for Rails"
@@ -29,7 +29,6 @@ Gem::Specification.new do |s|
 
   s.add_dependency 'rails',             ['>= 2.0.0']
   s.add_dependency 'yui-compressor',    ['>= 0.9.1']
-  s.add_dependency 'closure-compiler',  ['>= 0.1.0']
 
   s.files = Dir['lib/**/*', 'bin/*', 'jammit.gemspec', 'LICENSE', 'README']
 end
