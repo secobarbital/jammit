@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name      = 'secobarbital-jammit'
-  s.version   = '0.5.0'         # Keep version in sync with jammit.rb
+  s.version   = '0.5.0.1'         # Keep version in sync with jammit.rb
   s.date      = '2010-4-15'
 
   s.homepage    = "http://documentcloud.github.com/jammit/"
@@ -13,8 +13,8 @@ Gem::Specification.new do |s|
     Data-URI / MHTML image embedding.
   EOS
 
-  s.authors           = ['Jeremy Ashkenas']
-  s.email             = 'jeremy@documentcloud.org'
+  s.authors           = ['Jeremy Ashkenas', 'Seggy Umboh']
+  s.email             = ['jeremy@documentcloud.org', 'Seggy Umboh']
   s.rubyforge_project = 'jammit'
 
   s.require_paths     = ['lib']

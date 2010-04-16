@@ -10,7 +10,6 @@ require 'fileutils'
 require 'rubygems'
 gem     'rails', '~> 2.0'
 require 'yui/compressor'
-require 'closure-compiler'
 require 'active_support'
 require 'active_support/core_ext/hash'
 
