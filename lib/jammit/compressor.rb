@@ -16,25 +16,26 @@ module Jammit
       '.tif'  => 'image/tiff',
       '.tiff' => 'image/tiff',
       '.ttf'  => 'font/truetype',
-      '.otf'  => 'font/opentype'
+      '.otf'  => 'font/opentype',
+      '.woff' => 'font/woff'
     }
 
     # Font extensions for which we allow embedding:
     EMBED_EXTS      = EMBED_MIME_TYPES.keys
-    EMBED_FONTS     = ['.ttf', '.otf']
+    EMBED_FONTS     = ['.ttf', '.otf', '.woff']
 
-    # 32k maximum size for embeddable images (an IE8 limitation).
-    MAX_IMAGE_SIZE  = 32768
+    # (32k - padding) maximum length for data-uri assets (an IE8 limitation).
+    MAX_IMAGE_SIZE  = 32700
 
     # CSS asset-embedding regexes for URL rewriting.
     EMBED_DETECTOR  = /url\(['"]?([^\s)]+\.[a-z]+)(\?\d+)?['"]?\)/
     EMBEDDABLE      = /[\A\/]embed\//
-    EMBED_REPLACER  = /url\(__EMBED__([^\s)]+)(\?\d+)?\)/
+    EMBED_REPLACER  = /url\(__EMBED__(.+?)(\?\d+)?\)/
 
     # MHTML file constants.
-    MHTML_START     = "/*\r\nContent-Type: multipart/related; boundary=\"JAMMIT_MHTML_SEPARATOR\"\r\n\r\n"
-    MHTML_SEPARATOR = "--JAMMIT_MHTML_SEPARATOR\r\n"
-    MHTML_END       = "*/\r\n"
+    MHTML_START     = "/*\r\nContent-Type: multipart/related; boundary=\"MHTML_MARK\"\r\n\r\n"
+    MHTML_SEPARATOR = "--MHTML_MARK\r\n"
+    MHTML_END       = "\r\n--MHTML_MARK--\r\n*/\r\n"
 
     # JST file constants.
     JST_START       = "(function(){"
@@ -60,7 +61,7 @@ module Jammit
     # Concatenate together a list of JavaScript paths, and pass them through the
     # YUI Compressor (with munging enabled). JST can optionally be included.
     def compress_js(paths)
-      if (jst_paths = paths.grep(JST_EXT)).empty?
+      if (jst_paths = paths.grep(Jammit.template_extension_matcher)).empty?
         js = concatenate(paths)
       else
         js = concatenate(paths - jst_paths) + compile_jst(jst_paths)
@@ -72,6 +73,7 @@ module Jammit
     # :datauri or :mhtml variant, post-processes the result to embed
     # referenced assets.
     def compress_css(paths, variant=nil, asset_url=nil)
+      @asset_contents = {}
       css = concatenate_and_tag_assets(paths, variant)
       css = @css_compressor.compress(css) if Jammit.compress_assets
       case variant
@@ -88,13 +90,16 @@ module Jammit
     # specified your own preferred function, or turned it off.
     # JST templates are named with the basename of their file.
     def compile_jst(paths)
-      namespace = Jammit.template_namespace
-      compiled = paths.grep(JST_EXT).map do |path|
-        template_name = File.basename(path, File.extname(path))
-        contents      = File.read(path).gsub(/\n/, '').gsub("'", '\\\\\'')
-        "#{namespace}.#{template_name} = #{Jammit.template_function}('#{contents}');"
+      namespace   = Jammit.template_namespace
+      paths       = paths.grep(Jammit.template_extension_matcher).sort
+      base_path   = find_base_path(paths)
+      compiled    = paths.map do |path|
+        contents  = read_binary_file(path)
+        contents  = contents.gsub(/\n/, '').gsub("'", '\\\\\'')
+        name      = template_name(path, base_path)
+        "#{namespace}['#{name}'] = #{Jammit.template_function}('#{contents}');"
       end
-      compiler = Jammit.include_jst_script ? File.read(DEFAULT_JST_SCRIPT) : '';
+      compiler = Jammit.include_jst_script ? read_binary_file(DEFAULT_JST_SCRIPT) : '';
       setup_namespace = "#{namespace} = #{namespace} || {};"
       [JST_START, setup_namespace, compiler, compiled, JST_END].flatten.join("\n")
     end
@@ -102,13 +107,35 @@ module Jammit
 
     private
 
+    # Given a set of paths, find a common prefix path.
+    def find_base_path(paths)
+      return nil if paths.length <= 1
+      paths.sort!
+      first = paths.first.split('/')
+      last  = paths.last.split('/')
+      i = 0
+      while first[i] == last[i] && i <= first.length
+        i += 1
+      end
+      res = first.slice(0, i).join('/')
+      res.empty? ? nil : res
+    end
+
+    # Determine the name of a JS template. If there's a common base path, use
+    # the namespaced prefix. Otherwise, simply use the filename.
+    def template_name(path, base_path)
+      return File.basename(path, ".#{Jammit.template_extension}") unless base_path
+      path.gsub(/\A#{Regexp.escape(base_path)}\/(.*)\.#{Jammit.template_extension}\Z/, '\1')
+    end
+
     # In order to support embedded assets from relative paths, we need to
     # expand the paths before contatenating the CSS together and losing the
     # location of the original stylesheet path. Validate the assets while we're
     # at it.
     def concatenate_and_tag_assets(paths, variant=nil)
       stylesheets = [paths].flatten.map do |css_path|
-        File.read(css_path).gsub(EMBED_DETECTOR) do |url|
+        contents = read_binary_file(css_path)
+        contents.gsub(EMBED_DETECTOR) do |url|
           ipath, cpath = Pathname.new($1), Pathname.new(File.expand_path(css_path))
           is_url = URI.parse($1).absolute?
           is_url ? url : "url(#{construct_asset_path(ipath, cpath, variant)})"
@@ -169,7 +196,7 @@ module Jammit
     # append the RAILS_ASSET_ID cache-buster to URLs, if it's defined.
     def rewrite_asset_path(path, file_path)
       asset_id = rails_asset_id(file_path)
-      asset_id.blank? ? path : "#{path}?#{asset_id}"
+      (!asset_id || asset_id == '') ? path : "#{path}?#{asset_id}"
     end
 
     # Similar to the AssetTagHelper's method of the same name, this will
@@ -181,23 +208,25 @@ module Jammit
     end
 
     # An asset is valid for embedding if it exists, is less than 32K, and is
-    # stored somewhere inside of a folder named "embed".
-    # IE does not support Data-URIs larger than 32K, and you probably shouldn't
-    # be embedding assets that large in any case.
+    # stored somewhere inside of a folder named "embed". IE does not support
+    # Data-URIs larger than 32K, and you probably shouldn't be embedding assets
+    # that large in any case. Because we need to check the base64 length here,
+    # save it so that we don't have to compute it again later.
     def embeddable?(asset_path, variant)
       font = EMBED_FONTS.include?(asset_path.extname)
       return false unless variant
       return false unless asset_path.to_s.match(EMBEDDABLE) && asset_path.exist?
       return false unless EMBED_EXTS.include?(asset_path.extname)
-      return false unless font || asset_path.size < MAX_IMAGE_SIZE
+      return false unless font || encoded_contents(asset_path).length < MAX_IMAGE_SIZE
       return false if font && variant == :mhtml
-      true
+      return true
     end
 
     # Return the Base64-encoded contents of an asset on a single line.
     def encoded_contents(asset_path)
-      data = File.open(asset_path, 'rb'){|f| f.read }
-      Base64.encode64(data).gsub(/\n/, '')
+      return @asset_contents[asset_path] if @asset_contents[asset_path]
+      data = read_binary_file(asset_path)
+      @asset_contents[asset_path] = Base64.encode64(data).gsub(/\n/, '')
     end
 
     # Grab the mime-type of an asset, by filename.
@@ -207,9 +236,13 @@ module Jammit
 
     # Concatenate together a list of asset files.
     def concatenate(paths)
-      [paths].flatten.map {|p| File.read(p) }.join("\n")
+      [paths].flatten.map {|p| read_binary_file(p) }.join("\n")
     end
 
+    # `File.read`, but in "binary" mode.
+    def read_binary_file(path)
+      File.open(path, 'rb') {|f| f.read }
+    end
   end
 
 end

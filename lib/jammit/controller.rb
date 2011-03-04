@@ -5,7 +5,7 @@ module Jammit
   # missing or uncached asset packages.
   class Controller < ActionController::Base
 
-    VALID_FORMATS   = [:css, :js, :jst]
+    VALID_FORMATS   = [:css, :js]
 
     SUFFIX_STRIPPER = /-(datauri|mhtml)\Z/
 
@@ -15,12 +15,16 @@ module Jammit
     # yet been cached. The package will be built, cached, and gzipped.
     def package
       parse_request
+      template_ext = Jammit.template_extension.to_sym
       case @extension
-      when :js  then render :js   => (@contents = Jammit.packager.pack_javascripts(@package))
-      when :css then render :text => generate_stylesheets, :content_type => 'text/css'
-      when :jst then render :js   => (@contents = Jammit.packager.pack_templates(@package))
+      when :js
+        render :js => (@contents = Jammit.packager.pack_javascripts(@package))
+      when template_ext
+        render :js => (@contents = Jammit.packager.pack_templates(@package))
+      when :css
+        render :text => generate_stylesheets, :content_type => 'text/css'
       end
-      cache_package if perform_caching
+      cache_package if perform_caching && (@extension != template_ext)
     rescue Jammit::PackageNotFound
       package_not_found
     end
@@ -50,19 +54,19 @@ module Jammit
     def generate_stylesheets
       return @contents = Jammit.packager.pack_stylesheets(@package, @variant) unless @variant == :mhtml
       @mtime      = Time.now
-      request_url = prefix_url(request.request_uri)
+      request_url = prefix_url(request.fullpath)
       cached_url  = prefix_url(Jammit.asset_url(@package, @extension, @variant, @mtime))
       css         = Jammit.packager.pack_stylesheets(@package, @variant, request_url)
       @contents   = css.gsub(request_url, cached_url) if perform_caching
       css
     end
 
-    # Extracts the package name, extension (:css, :js, :jst), and variant
-    # (:datauri, :mhtml) from the incoming URL.
+    # Extracts the package name, extension (:css, :js), and variant (:datauri,
+    # :mhtml) from the incoming URL.
     def parse_request
       pack       = params[:package]
       @extension = params[:extension].to_sym
-      raise PackageNotFound unless VALID_FORMATS.include?(@extension)
+      raise PackageNotFound unless (VALID_FORMATS + [Jammit.template_extension.to_sym]).include?(@extension)
       if Jammit.embed_assets
         suffix_match = pack.match(SUFFIX_STRIPPER)
         @variant = Jammit.embed_assets && suffix_match && suffix_match[1].to_sym
@@ -84,7 +88,7 @@ end
 # Make the Jammit::Controller available to Rails as a top-level controller.
 ::JammitController = Jammit::Controller
 
-if Rails.env.development?
+if defined?(Rails) && Rails.env.development?
   ActionController::Base.class_eval do
     append_before_filter { Jammit.reload! }
   end

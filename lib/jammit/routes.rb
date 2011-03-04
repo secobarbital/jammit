@@ -1,6 +1,6 @@
 module Jammit
 
-  # Rails 2.x routing module.
+  # Rails 2.x routing module. Rails 3.x routes are in rails/routes.rb.
   module Routes
 
     # Jammit uses a single route in order to slow down Rails' routing speed
@@ -8,18 +8,16 @@ module Jammit
     #   Jammit::Routes.draw(map)
     # Passing in the routing "map" object.
     def self.draw(map)
-      map.jammit "/#{Jammit.package_path}/:package.:extension",
-                 :controller => 'jammit', :action => 'package'
+      map.jammit "/#{Jammit.package_path}/:package.:extension", {
+        :controller => 'jammit',
+        :action => 'package',
+        :requirements => {
+          # A hack to allow extension to include "."
+          :extension => /.+/
+        }
+      }
     end
 
   end
 
-end
-
-# Rails 3.x routes.
-if defined?(Jammit::Railtie)
-  Jammit::Railtie.routes do
-    match "/#{Jammit.package_path}/:package.:extension",
-      :to => 'jammit#package', :as => 'jammit'
-  end
 end

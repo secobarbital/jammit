@@ -6,29 +6,29 @@ module Jammit
   # to the cached packages.
   module Helper
 
-    DATA_URI_START = "<!--[if (!IE)|(gte IE 8)]><!-->"
-    DATA_URI_END   = "<!--<![endif]-->"
-    MHTML_START    = "<!--[if lte IE 7]>"
-    MHTML_END      = "<![endif]-->"
+    DATA_URI_START = "<!--[if (!IE)|(gte IE 8)]><!-->" unless defined?(DATA_URI_START)
+    DATA_URI_END   = "<!--<![endif]-->"                unless defined?(DATA_URI_END)
+    MHTML_START    = "<!--[if lte IE 7]>"              unless defined?(MHTML_START)
+    MHTML_END      = "<![endif]-->"                    unless defined?(MHTML_END)
 
     # If embed_assets is turned on, writes out links to the Data-URI and MHTML
     # versions of the stylesheet package, otherwise the package is regular
     # compressed CSS, and in development the stylesheet URLs are passed verbatim.
     def include_stylesheets(*packages)
       options = packages.extract_options!
-      return individual_stylesheets(packages, options) unless Jammit.package_assets
+      return individual_stylesheets(packages, options) unless should_package?
       disabled = (options.delete(:embed_assets) == false) || (options.delete(:embed_images) == false)
-      return packaged_stylesheets(packages, options) if disabled || !Jammit.embed_assets
-      return embedded_image_stylesheets(packages, options)
+      return html_safe(packaged_stylesheets(packages, options)) if disabled || !Jammit.embed_assets
+      return html_safe(embedded_image_stylesheets(packages, options))
     end
 
     # Writes out the URL to the bundled and compressed javascript package,
     # except in development, where it references the individual scripts.
     def include_javascripts(*packages)
       tags = packages.map do |pack|
-        Jammit.package_assets ? Jammit.asset_url(pack, :js) : Jammit.packager.individual_urls(pack.to_sym, :js)
+        should_package? ? Jammit.asset_url(pack, :js) : Jammit.packager.individual_urls(pack.to_sym, :js)
       end
-      javascript_include_tag(tags.flatten)
+      html_safe(javascript_include_tag(tags.flatten))
     end
 
     # Writes out the URL to the concatenated and compiled JST file -- we always
@@ -39,6 +39,14 @@ module Jammit
 
 
     private
+
+    def should_package?
+      Jammit.package_assets && !(Jammit.allow_debugging && params[:debug_assets])
+    end
+
+    def html_safe(string)
+      string.respond_to?(:html_safe) ? string.html_safe : string
+    end
 
     # HTML tags, in order, for all of the individual stylesheets.
     def individual_stylesheets(packages, options)
